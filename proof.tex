@@ -1,0 +1,550 @@
+\clearpage
+
+\section{Shape reduction correctness proof}
+\label{appx:sec:dim_red}
+
+When a DNN model involves large size tensors, such as popular LLMs, it becomes
+infeasible for current solvers (e.g., Z3) to verify its parallel execution
+considering the complexity.
+In response, we propose a verification for the same model architecture but with reduced tensor shapes, and prove that:
+the verification conclusion on the shape-reduced model also applies to the original model with larger tensor shapes.
+
+\subsection{Formulation}
+
+A DNN model consists of multiple operators, such as \texttt{MatMul} and
+\texttt{ReLU}, which essentially are functions with data tensors as input and output.
+Given input tensor(s), including tensors representing weights,
+activation and optimizer state, such a DNN function can produce corresponding
+output tensor(s).
+Given a DNN function $f$ that executes on a single device, there is an
+alternative function $g$ ($g$ is different from $f$) that can execute on either
+single device sequentially or multiple devices concurrently.
+Our goal is to verify that
+regardless of the inputs,
+$f$ and $g$ can always produce the same results---an equivalence.
+
+\begin{definition}[Tensor]
+A \textit{tensor} is an object that generalizes scalars, vectors,
+    and matrices to higher dimensions.
+    Formally, an order-$n$ tensor (also called an $n$-th order tensor)
+    is an element of the tensor space:
+
+\begin{equation}
+\mathcal{T} \in \mathbb{R}^{d_1 \times d_2 \times \dots \times d_n}
+\end{equation}
+
+where $\mathbb{R}$ represents real number field and $d_1, d_2, \dots, d_n$ denote the
+    dimensions along each mode of the tensor. A tensor can be represented as a
+    multidimensional array, with components indexed as:
+
+\begin{equation}
+\mathcal{T}_{i_1,i_2,\dots,i_n}, \quad i_k \in \{0, \dots, d_k-1\}, \quad \forall k \in \{1, 2, \dots, n\}.
+\end{equation}
+
+Tensors are used as primitive data in machine learning.
+
+\end{definition}
+
+A tensor can be partitioned into multiple sub-tensors
+and may stored across multiple computational devices
+in a distributed computing environment.
+Such a distributed tensor is defined by a partitioning scheme that divides
+$\mathcal{T}$ into smaller sub-tensors:
+
+\begin{equation}
+\mathcal{T} = \bigcup_{p \in \mathcal{P}} \mathcal{T}^{(p)},
+\end{equation}
+
+where $\mathcal{P}$ denotes the set of computational devices, and each sub-tensor $\mathcal{T}^{(p)}$ is assigned to a specific device $p \in \mathcal{P}$. The partitioning can be done in various ways, such as:
+
+\begin{itemize}
+    \item \emph{Dimensional-wise partitioning}: The tensor is divided into overlapping or non-overlapping blocks along one or more modes.
+    \item \emph{Value-wise partitioning}: Individual elements are with partial value distributed across devices.
+\end{itemize}
+
+Distributed tensors enable storing large data and effective parallel processing
+for large-scale machine learning.
+
+
+\heading{Lineage information of distributed tensors.}
+Each partition $\mathcal{T}^{(p)}$ carries \textit{lineage information}
+$\mathcal{L}(\mathcal{T}^{(p)})$, which encodes the metadata necessary for
+reconstructing the full tensor. This lineage information includes:
+
+\begin{itemize}
+    \item Partitioning scheme and indexing metadata,
+    \item Partial value occupancy.
+\end{itemize}
+
+The full tensor can be reconstructed from its distributed representation using
+the \textit{merge} operation:
+
+\begin{equation}
+    \mathcal{T} = \text{Merge}(\mathcal{T}^{(p)}, \mathcal{L}).
+\end{equation}
+
+The \textit{Merge} function utilizes lineage information $\mathcal{L}$ to
+correctly assemble the distributed tensor back into its full representation.
+
+
+\begin{definition}[Functions]
+A general function that operates on multiple tensors can be defined as:
+\begin{equation}
+f: (\mathbb{R}^{d_1 \times d_2 \times \dots \times d_n}, \mathbb{R}^{d_1' \times d_2' \times \dots \times d_m'}, \cdots) \to \mathbb{R}^{d_1'' \times d_2'' \times \dots \times d_k''}
+\end{equation}
+where $f$ takes one or more tensors as input and outputs a tensor of a potentially different shape.
+\end{definition}
+
+
+For simplicity, we assume a single-tensor input for function \f throughout this
+proof. The proof can be naturally extended to accommodate multiple input
+and output tensors.
+
+People have long observed that deep learning operators like matrix multiplication
+and convolution are \simd{} (Single-Instruction Multiple-Data):
+the operation consists of repeated, homogeneous computations (the ``kernel'') over array elements.
+This \simd{} characteristic is the core enabler for our shape reduction mechanism.
+Below, we formally define what is a \simd{} function.
+
+\begin{definition}[\CF{\kfunc}]
+Let $\funcfull$ be a function.
+A kernel function $\theta$ associated with \f takes a subtensor from $\x$
+and outputs a scalar value. Formally,
+\[
+\theta_f: \mathbb{R}^{k} \to \mathbb{R},
+\]
+where $k$ is the size of the subtensor of $\x$.
+\label{def:kernelfunc}
+\end{definition}
+
+Next, we define which input subtensor is associated with each output element.
+
+\begin{definition}[\Depmap]
+Consider a function $\funcfull$.
+A \depmap $\tr{}$ associated with \f is a function that maps each index $i$ in $\y$
+to a list of indices in $\x$. Formally,
+\begin{align*}
+    \tr{}_f: idx(\y) \to [idx(\x)],
+\end{align*}
+where $idx(\cdot)$ is the indexing function of the tensor.
+\label{def:mapping}
+\label{def:depmap}
+\end{definition}
+
+
+With \depmap and \kfunc, we define \simd{} functions.
+
+
+\begin{definition}[\simd{} function]
+\label{def:simd_func}
+
+A function
+$\funcfull$
+is a \simd{} function if,
+for each $\y[i]$,
+\[
+\y[i] = \theta(\x_{1}, \x_{2}, \dots, \x_{k}),
+\]
+where $\theta$ is the \kfunc of \f, and
+\[
+\x_{j} = \x[ \tau(i)[j] ],\quad 1\le j \le k
+\]
+where $\tau$ is the \depmap of \f.
+\label{def:simdfunc}
+\end{definition}
+
+
+By fixing a \kfunc $\theta$ and a \depmap $\tau$,
+one can define an \simd{} function.
+We denote an \simd{} function \f using its \kfunc and \depmap as:
+$\y[i] = \theta_f(\x[\tau_f(i)])$.
+
+
+
+
+
+\subsection{Observations: \simd{} characteristics in LLM operations}
+
+Deep Neural Network (DNN) computations are characterized by their application
+to high-dimensional data tensors. A closer examination of commonly used DNN
+operations reveals that a large number of elements in the output tensor share
+the same computational logic, differing only in the specific input elements
+they process. This computational pattern aligns closely with
+Single-Instruction-Multiple-Data (SIMD), a concept from computer architecture.
+
+
+\subsubsection{Observation 1: LLM operators are \simd{} functions.}
+We observe that all layers in the transformer architecture are \simd{},
+including Feed Forward layers,
+Multi-Head Attention layers (without masking),
+Add \& Norm layers, ReLU, Softmax,
+and Residual addition.
+
+As an example, matrix multiplication (i.e., MatMul) can be expressed as an \simd{} function.
+Given two matrices $A \in \R^{m \times p}$ and $B \in \R^{p \times n}$,
+the resulting matrix $C \in \R^{m \times n}$ has elements $c_{i,j}$ (short for $C[i][j]$)
+computed by:
+$c_{i,j} = \sum_{k=1}^{p} a_{i,k} \cdot b_{k,j}$.
+MatMul is a \simd{} function because it has
+\begin{myitemize2}
+
+\item a \kfunc:
+    \begin{center}
+    $\theta(a_{i,1},\dots, a_{i,p}, b_{1,j}, \dots, b_{p,j}) = \sum_{k=1}^{p} a_{i,k} \cdot b_{k,j};$
+    \end{center}
+
+\item a \depmap for each input tensor:
+  \begin{align*}
+    \tau^{A}(i,j) &= [(i, k) | 1 \leq k \leq p],\\
+    \tau^{B}(i,j) &= [(k, j) | 1 \leq k \leq p],
+  \end{align*}
+  where $\tau^A$ and $\tau^B$ are \depmap{}s for input matrix A and B;
+
+\item and MatMul can be expressed as:
+\[
+c_{i,j} = \theta(A[\tau^A(i,j)] \oplus B[\tau^B(i,j)]),
+\]
+where $\oplus$ represents list concatenation.
+
+\end{myitemize2}
+
+
+
+\subsubsection{Observation 2: LLM operators have \depmap{}s that can be expressed as linear combinations.}
+This property is intuitive, as the ``striding'' of kernel functions across
+tensors typically occurs at regular, constant intervals.
+Consequently, when the input to the \depmap---corresponding to the output tensor's index---changes,
+the resulting input indices change linearly.
+That is, the mapping takes the linear form: $\tau(i) = M\cdot i + b$.
+
+For example, in the above MatMul case,
+the \depmap $\tau^A$ can be written as a linear form:
+\[
+    \tau^{A}(i,j) = M_A \begin{bmatrix} i \\ j \end{bmatrix} + b_A,\ \
+  M_A = \begin{pmatrix}
+    1 & 0 \\
+    1 & 0 \\
+    \vdots & \vdots \\
+    1 & 0
+  \end{pmatrix}_{p \times 2},
+  b_A = \begin{pmatrix}
+    0 & 1 \\
+    0 & 2 \\
+    \vdots & \vdots \\
+    0 & k
+  \end{pmatrix}_{p \times 2}
+\]
+
+
+
+
+\subsubsection{\simd{} Functions in LLMs.}
+Following Definition~\ref{def:simd_func}, LLM operators can be formally expressed as \simd{} functions.
+We elaborate on several as examples below.
+
+\paragraph{ReLU Redefined as SIMD Function}
+
+The Rectified Linear Unit (ReLU) activation function can be defined in SIMD terms as follows:
+
+Given the ReLU function:
+\[
+\text{ReLU}(x) = \max(0, x)
+\]
+
+The SIMD function $\theta$ for ReLU is:
+\[
+\theta(x_i) = \max(0, x_i)
+\]
+
+For ReLU, the input mapping function $\tau$ is:
+\[
+\tau(i) = \{i\}
+\]
+
+Thus, for each output element $y_i$ in the output tensor $\mathbf{y}$, the corresponding input element is $x_i$ from the input tensor $\mathbf{x}$.
+
+\paragraph{MatMul Redefined as SIMD Function}
+
+Matrix multiplication (MatMul) can be defined in SIMD terms as follows:
+
+Given two matrices $A$ of size $m \times p$ and $B$ of size $p \times n$, the resulting matrix $C$ of size $m \times n$ has elements $c_{ij}$ computed by:
+\[
+c_{ij} = \sum_{k=1}^{p} a_{ik} \cdot b_{kj}
+\]
+
+The SIMD function $\theta$ for MatMul is:
+\[
+\theta(a_{i1}, b_{1j}, a_{i2}, b_{2j}, \dots, a_{ip}, b_{pj}) = \sum_{k=1}^{p} a_{ik} \cdot b_{kj}
+\]
+
+Here, the number of input elements $k$ for each computation of $c_{ij}$ is $2p$.
+
+The input mapping function $\tau$ for an element $c_{ij}$ is:
+\[
+\begin{split}
+\tau(i, j) = \{ \{(i, 1), (i, 2), \cdots, (i, p)\}, \\
+                \{(1, i), (2, i), \cdots, (p, i)\} \} \\
+           = \{ \{(i, k) | 1 \leq k \leq p \}, \\
+                \{(k, i) | 1 \leq k \leq p \} \}
+\end{split}
+\]
+
+The mapping specifies the indices in matrices $A$ and $B$ that contribute to the output element $c_{ij}$ of matrix $C$.
+
+\paragraph{Convolution as SIMD Function}
+
+A standard 2D convolution operation can be expressed in SIMD terms as follows:
+
+Given an input tensor $\mathbf{x} \in \mathbb{R}^{H \times W \times C_{in}}$ and a kernel tensor $\mathbf{w} \in \mathbb{R}^{K_H \times K_W \times C_{in} \times C_{out}}$, the output tensor $\mathbf{y} \in \mathbb{R}^{H' \times W' \times C_{out}}$ is computed as:
+
+\[
+y_{i,j,c} = \sum_{m=1}^{K_H} \sum_{n=1}^{K_W} \sum_{c'=1}^{C_{in}} x_{i+m, j+n, c'} \cdot w_{m, n, c', c}
+\]
+
+The SIMD function $\theta$ for convolution is:
+
+\[
+\begin{split}
+\theta(\{x_{i+m, j+n, c'} \mid 1 \leq m \leq K_H, 1 \leq n \leq K_W, 1 \leq c' \leq C_{in} \}) \\
+= \sum_{m=1}^{K_H} \sum_{n=1}^{K_W} \sum_{c'=1}^{C_{in}} x_{i+m, j+n, c'} \cdot w_{m, n, c', c}
+\end{split}
+\]
+
+The input mapping function $\tau$ for convolution is:
+
+\begin{align*}
+    \tau(i, j, c) = &\{(i+m, j+n, c') \mid \\
+                    & 1 \leq m \leq K_H, 1 \leq n \leq K_W, 1 \leq c' \leq C_{in} \}
+\end{align*}
+
+This mapping function defines how each output element $y_{i,j,c}$ is derived from a specific subset of input elements.
+
+\paragraph{Pooling as SIMD Function}
+
+Consider a max-pooling operation with kernel size $K_H \times K_W$ and stride $s$, applied to an input tensor $\mathbf{x} \in \mathbb{R}^{H \times W \times C}$. The output tensor $\mathbf{y} \in \mathbb{R}^{H' \times W' \times C}$ is computed as:
+
+\[
+y_{i,j,c} = \max_{1 \leq m \leq K_H, 1 \leq n \leq K_W} x_{si+m, sj+n, c}
+\]
+
+The SIMD function $\theta$ for max pooling is:
+
+\[
+\begin{split}
+\theta(\{x_{si+m, sj+n, c} \mid 1 \leq m \leq K_H, 1 \leq n \leq K_W \}) \\
+= \max_{1 \leq m \leq K_H, 1 \leq n \leq K_W} x_{si+m, sj+n, c}
+\end{split}
+\]
+
+The input mapping function $\tau$ for pooling is:
+
+\[
+\tau(i, j, c) = \{(si+m, sj+n, c) \mid 1 \leq m \leq K_H, 1 \leq n \leq K_W \}
+\]
+
+This formalism captures how each pooling operation aggregates information from a specific region of the input tensor.
+
+\subsubsection{\Depmap $\tau$ in DNN}
+\label{subsubsec:tau}
+
+For a general tensor operation defined by a function $f: \mathbb{R}^n \to \mathbb{R}^m$, the input mapping function $\tau: \mathbb{N}^m \to (\mathbb{N}^{n})^k$ defines the dependency of each output element on a subset of input elements.
+
+In its general form, $\tau$ can be expressed as:
+
+\[
+\tau(i) = \{ \phi(i, j) \mid j = 1, 2, \dots, k \}
+\]
+
+where:
+\begin{itemize}
+    \item $i \in \mathbb{N}^m$ is the index of the output tensor,
+    \item $j$ indexes the $k$ input elements required to compute $y_i$,
+    \item $\phi: \mathbb{N}^m \times \mathbb{N}^+ \to \mathbb{N}^n$ is an index transformation function that determines which input elements contribute to $y_i$.
+\end{itemize}
+
+The function $\phi$ follows specific constraints to ensure a structured and predictable mapping between input and output indices. Specifically, in DNN, $\phi$ return an ordered list of multi-dimensional output indices, preserving the computational consistency required for SIMD processing. We observe in DNN that each output index is expressible as a linear polynomial, where the input index $i$ serves as the variable, while the iterator number $j$ and other shape-related parameters—such as the dimensions of the input tensor, the convolution kernel size, and the stride—act as constant coefficients or offsets.
+
+A key property of the linear polynomial expression of $\phi$ is that nested functions naturally preserve and combine their respective input mappings $\tau$ while maintaining the linear polynomial structure.
+
+
+Thus, $\tau$ provides a unified way to describe how each output element maps to its respective input elements across various DNN operations.
+
+\subsection{Correctness proof for shape reduction}
+
+This section establishes the correctness of \sys's shape reduction
+by proving the equivalence between two data flow graphs (DFGs) on a subset of dimensions
+implies equivalence across all dimensions.
+We denote the original and transformed DFGs---before and after applying parallelization techniques---as functions
+\f and \g, respectively.
+
+\subsubsection{Prerequisite relations.}
+Before presenting the main theorem, we begin with two equivalent definitions
+that serve as the foundation for the proof.
+
+\begin{definition}[\CF{\depeq}]
+For two \depmap{}s $\tau_1$ and $\tau_2$,
+we call them \depeq, denoted $\tau_1 \cong_P \tau_2$,
+if there exists a permutation function $P$,
+such that
+\[
+\forall i, \ \ \tau_1(i) = P(\tau_2(i))
+\]
+\end{definition}
+
+\CF{\depeq} captures LLM operators with commutative
+properties, where permuting the inputs does not affect the output. Similarly,
+we need to define a corresponding equivalence relation for \kfunc{}s.
+
+
+\begin{definition}[\CF{\kerneq}]
+For two \kfunc{}s $\theta_1$ and $\theta_2$,
+we call them \kerneq, denoted $\theta_1 \cong_Q \theta_2$,
+if there exists a non-empty set $Q$ of permutation functions,
+such that
+\[
+\forall P\in Q,\ \forall \x, \ \ \theta_1(\x) = \theta_2(P(\x))
+\]
+\end{definition}
+
+
+\begin{definition}[Well-formed \kfunc]
+    We call a \kfunc $\theta$ well-formed if,
+    \begin{align*}
+        \exists \x,\x', \forall i, \x[i] \neq \x'[i] &\text{ and } \forall j\neq i, \x[j]=\x'[j]\\
+        & \theta(\x) \neq \theta(\x')
+    \end{align*}
+    \label{def:wellform}
+\end{definition}
+
+Essentially, all elements in the inputs to the well-formed \kfunc{}s
+contribute to the final output.
+There is no such input element that does not influcent the output.
+
+\subsubsection{Main proofs.}
+Below is the main proof for the correctness of shape reduction
+
+\begin{lemma}
+For \simd{} functions \f and \g with well-formed \kfunc{}s:
+\[
+\theta_f \cong_Q \theta_g\ \land\
+\tau_f \cong_P \tau_g \ \land \
+P\in Q \implies f=g
+\]
+\label{lemma:main}
+\end{lemma}
+
+\begin{proof}
+\begin{align*}
+\forall \x, \forall i, f(\x)[i]
+   &= \theta_f(\x(\tau_f(i)))      &\text{[by Definition~\ref{def:simdfunc}]}\\
+   &= \theta_g(P(\x[\tau_f(i)]))   &\text{[by $\theta_f\cong_Q \theta_g \land P\in Q$]}\\
+   &= \theta_g(\x[P(\tau_f(i))])   &\text{[by tensor indexing rules]}\\
+   &= \theta_g(\x[\tau_g(i)])      &\text{[by $\tau_f \cong_P \tau_g$]}\\
+   &= g(\x)[i]
+\end{align*}
+Because for any input $\x$, $f(\x)$ and $g(\x)$ produce the same result,
+therefore $f=g$.
+\end{proof}
+
+Next, we prove that dimention reduction also applies to
+reductional opreations such as \texttt{sum}.
+A reductional function $f: \mathbb{R}^n \rightarrow \mathbb{R}$ returns a single
+output element from processing a reduction operation among all elements in the
+input tensor, with the reduction operation satisfying the commutative and
+associative laws.
+
+\begin{definition}[Reductional function]
+For an input tensor $X \in \mathbb{R}^{n}$,
+the reductional function $f$ applies a binary operation $\odot$ to all
+elements of $X$ such that:
+\[
+f(X) = x_1 \odot x_2 \odot \cdots \odot x_n,
+\]
+and $\odot$ satisfies
+    commutativity ($a \odot b = b \odot a$) and associativity ($(a \odot b) \odot c = a \odot (b \odot c)$).
+\end{definition}
+
+
+\begin{lemma}
+Given reductional functions $f$ and $g$,
+\[
+\forall \x \in \mathbb{R}^2, f(\x) = g(\x) \implies \forall \x \in \mathbb{R}^{n}, n>2, f(\x) = g(\x).
+\]
+\label{th:reduce_equal}
+\end{lemma}
+
+\begin{proof}
+The lemma can be proved using mathematical induction.
+
+\emph{Base case:} Consider the base case: $f(\x) = g(\x) |\ \x \in R^{[2]}$, which is true.
+
+\emph{Inductive Step:} Assume that $f(\x) = g(\x) |\ \x \in R^{[k]}, k >=2$ is true. Now we need to prove that $f(\x) = g(\x) |\ \x \in R^{[k+1]}$ is also true.
+\begin{itemize}
+    \item Start with $\{\x |\ \x \in R^{[k+1]}\}$, $\x$ can also be expressed as $concat(\x[1..k], \x[k+1])$.
+    \item Given the commutative and associative laws, $f(\x)=f(f(\x[1..k]), \x[k+1])$, and $g(\x)=g(g(\x[1..k]), \x[k+1])$.
+    \item Based on ``$f(\x) = g(\x) |\ \x \in R^{[k]}, k >=2$'' is true, $f(\x[1..k])=g(\x[1..k])$, then $g(\x)=g(f(\x[1..k]), \x[k+1])$.
+    \item Based on ``$f(\x) = g(\x) |\ \x \in R^{[2]}$'', $g(\x)=g(f(\x[1..k]), \x[k+1])=f(f(\x[1..k]), \x[k+1])$, also considering $f(\x)=f(f(\x[1..k]), \x[k+1])$, then $f(\x) = g(\x) |\ \forall \x \in R^{[k+1]}$ is also true.
+\end{itemize}
+\end{proof}
+
+With Lemma~\ref{th:reduce_equal}, checking equivalence of operator MatMul
+$A \cdot B$ where input tensors $A \in R^{[m, k]}, B \in R^{[k, n]}$, with $m, k,
+n \in \mathbb{Z}^{+}$ can be simplified by setting $k=2$.
+
+Finally, we prove the main theorem below.
+Notice that \sys's SMT solver proves the precondition:
+there exists some dimension of the output tensor (namely, $i$)
+that both \f and \g produce the same result for any input $\x$.
+
+\begin{theorem}
+Let \f and \g be functions composed by LLM operators.
+\[
+    \exists i, \forall \x, f(\x)[i]=g(\x)[i] \implies \forall i,\x, \ f(\x)[i]=g(\x)[i]
+\]
+\label{theorem:main}
+\end{theorem}
+
+\begin{proof}
+
+By the precondition,
+we can derive that there exists a non-empty set $Q$ such that $\theta_f \cong_Q \theta_g$.
+We prove this by contradiction---if $\theta_f$ and $\theta_g$ are not
+\kerneq, then there must exist some input $\x'$ where $\theta_f(\x') \neq \theta_g(\x')$.
+Consdier this $\x'$, we can construct an input tensor $\mathcal{X}$ to \f and \g
+    such that $\x'$ is a sub-tensor of $\mathcal{X}$ and $\x'$'s corresponding output poinsition is the ith element in the output.
+    Because $\theta_f(\x') \neq \theta_g(\x')$,
+    then $f(\mathcal{X})[i] \neq g(\mathcal{X})[i]$,
+    a contradiction to the precondition.
+
+
+Next,
+by our observation 2 and the precondition, we conclude $\tau_f \cong_P \tau_g$.
+From the precondition, we can derive that $\exists P, \tau_f(i) \cong_P \tau_g(i)$.
+By observation 2, we know that the $P$ applies to all
+dimensions (i.e., $\tau_f \cong_P \tau_g$) due to the linear transformation.
+
+Then, using the precondition and $\tau_f \cong_P \tau_g$, we prove $P \in Q$
+by contradiction: assume $P \not\in Q$, then
+$\exists \x', \theta_f(\x') \neq \theta_g(P(\x'))$.
+Because the precondition is true for all input tensor,
+we can construct an input tensor $\mathcal{X}$ to \f and \g,
+such that $\mathcal{X}[\tau_f(j)] = \x'$.
+Now we have:
+    \begin{align*}
+        f(\mathcal{X})[j] &= \theta_f(\mathcal{X}[\tau_f(j)]) \\
+          &= \theta_f(\x') \neq \theta_g(P(\x')) \\
+          & = \theta_g(P(\mathcal{X}[\tau_g(j)]))   = g(\mathcal{X})[j],
+    \end{align*}
+which is a contradiction to the precondition.
+
+Finally, by Lemma~\ref{lemma:main},
+    \[
+\theta_f \cong_Q \theta_g \land \tau_f \cong_P \tau_g \land P \in Q \implies \forall \x, f(\x)=g(\x)
+\]
+\end{proof}
+
+
+
+
+
+
