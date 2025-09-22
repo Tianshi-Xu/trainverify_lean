@@ -1,32 +1,42 @@
 import os
+import base64
 from openai import AzureOpenAI
+from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 
-endpoint = "https://ai4mtest1.openai.azure.com/"
-model_name = "gpt-5"
-deployment = "gpt-5"
+endpoint = os.getenv("ENDPOINT_URL", "https://ai4mtest1.openai.azure.com/")
+deployment = os.getenv("DEPLOYMENT_NAME", "gpt-5")
 
-subscription_key = "f6052a23f2154134bd7ed1e37c896814"
-api_version = "2024-12-01-preview"
+# Initialize Azure OpenAI client with Entra ID authentication
+credential = DefaultAzureCredential(managed_identity_client_id="7e0d39de-9cb1-4585-85af-1e82ea00b36d")
+token_provider = get_bearer_token_provider(credential, "https://cognitiveservices.azure.com/.default")
 
 client = AzureOpenAI(
-    api_version=api_version,
     azure_endpoint=endpoint,
-    api_key=subscription_key,
+    azure_ad_token_provider=token_provider,
+    api_version="2025-01-01-preview",
 )
 
-response = client.chat.completions.create(
-    messages=[
+
+# IMAGE_PATH = "YOUR_IMAGE_PATH"
+# encoded_image = base64.b64encode(open(IMAGE_PATH, 'rb').read()).decode('ascii')
+messages=[
         {
             "role": "system",
             "content": "You are a helpful assistant.",
         },
         {
             "role": "user",
-            "content": "I am going to Paris, what should I see?",
+            "content": "Which model is you are?",
         }
-    ],
-    max_completion_tokens=16384,
-    model=deployment
+    ]
+
+# Include speech result if speech is enabled
+completion = client.chat.completions.create(
+    model=deployment,
+    messages=messages,
+    max_completion_tokens=1600,
+    stop=None,
+    stream=False
 )
 
-print(response.choices[0].message.content)
+print(completion.choices[0].message.content)
