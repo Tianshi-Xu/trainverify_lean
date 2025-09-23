@@ -160,21 +160,36 @@ def save_results(results: List[Dict[str, Any]], output_file: str):
         json.dump(results, f, ensure_ascii=False, indent=2)
     print(f"结果已保存到: {output_file}")
 
+def operators_filter(operators):
+    with open("trainverify/onnx_types.json", 'r', encoding='utf-8') as f:
+        op_types = json.load(f)
+    accepted_ops = [item["name"] for item in op_types[0]["operators"] if item["difficulty"]=="简单"]
+    print(accepted_ops)
+    """过滤算子"""
+    filtered = []
+    for op in operators:
+        name = op.get("name", "")
+        if name not in accepted_ops:
+            continue
+        filtered.append(op)
+    return filtered
+
 def main():
     """主函数"""
     # 加载SIMD定义
     simd_lean = read_file("trainverify/SIMDDefinition.lean")
     # 加载算子数据
     operators = load_operators("trainverify/onnx_operators.json")
-
+    operators = operators_filter(operators)
+    print(f"过滤后剩 {len(operators)} 个算子。")
     # 可以只处理前几个算子进行测试
-    operators = operators[34:35]  # 取消注释来测试前5个算子
-    print(operators[0].get("name"))
+    # operators = operators[34:35]  # 取消注释来测试前5个算子
+    # print(operators[0].get("name"))
     # 处理所有算子
-    results = process_operators_parallel(operators, simd_lean, max_workers=1)
+    results = process_operators_parallel(operators, simd_lean, max_workers=5)
 
     # 保存结果
-    output_file = f"onnx_operators_analysis_sync_{int(time.time())}.json"
+    output_file = f"trainverify/onnx_operators_analysis.json"
     save_results(results, output_file)
 
     # 打印一些统计信息

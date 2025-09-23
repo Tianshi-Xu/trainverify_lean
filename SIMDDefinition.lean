@@ -9,6 +9,7 @@ import Mathlib.Algebra.BigOperators.Ring
 import Mathlib.Tactic.Linarith
 import Mathlib.Tactic.Ring
 import Mathlib.Data.Vector.Basic -- For Vector.get_eq_get_toList
+import Mathlib.Analysis.SpecialFunctions.Arsinh -- For Real.arsinh
 
 namespace SIMD
 
@@ -154,5 +155,101 @@ theorem sum_is_wellformed (k : ℕ) : WellFormedKernel k (sumKernel k) := by
 
         rw [sum_v, sum_v']
         norm_num
+
+-- ===== 通用Element-wise算子支持 =====
+
+/-- 通用的一元element-wise依赖映射：用于所有一元element-wise算子
+    将每个输出索引映射到输入张量中的相同索引位置 -/
+def unaryElementwiseDependency (dims : List ℕ) (input : MultiTensorInput)
+    (h_input_count : input.p = 1)
+    (h_dims : input.dims.get ⟨0, by rw [h_input_count]; norm_num⟩ = dims) :
+    GeneralizedDependencyMapping input dims 1 :=
+{
+  map := fun out_idx =>
+    List.Vector.ofFn (fun _ : Fin 1 =>
+      { tensor_idx := ⟨0, by rw [h_input_count]; norm_num⟩,
+        multi_dim_idx := h_dims.symm ▸ out_idx }),
+  valid := by
+    intro out_idx h_valid_out
+    intro i
+    -- There's only one element in the vector (i = 0)
+    simp [List.Vector.get_ofFn]
+    -- Need to prove validInputPointer for the mapped pointer
+    simp [validInputPointer, validIndex]
+    -- The goal is: ∀ (j : Fin (input.dims.get ⟨0, _⟩).length), (h_dims.symm ▸ out_idx).get j < (input.dims.get ⟨0, _⟩).get j
+    -- Use subst to substitute h_dims equation
+    subst h_dims
+    -- Now the cast becomes identity and should simplify
+    simp
+    exact h_valid_out
+}
+
+/-- 通用一元element-wise SIMD函数构造器 -/
+noncomputable def createUnaryElementwiseSIMD (dims : List ℕ) (input : MultiTensorInput)
+    (h_input_count : input.p = 1)
+    (h_dims : input.dims.get ⟨0, by rw [h_input_count]; norm_num⟩ = dims)
+    (kernel : KernelFunction 1) :
+    SIMDFunction input dims :=
+{
+  k := 1,
+  kernel := kernel,
+  dependency := unaryElementwiseDependency dims input h_input_count h_dims
+}
+
+/-- 通用一元element-wise SIMD函数证明模板 -/
+theorem unaryElementwise_is_SIMD (dims : List ℕ) (input : MultiTensorInput)
+    (h_input_count : input.p = 1)
+    (h_dims : input.dims.get ⟨0, by rw [h_input_count]; norm_num⟩ = dims)
+    (kernel : KernelFunction 1) :
+    isSIMDFunction input dims (fun _ => applySIMD input dims (createUnaryElementwiseSIMD dims input h_input_count h_dims kernel)) := by
+  use createUnaryElementwiseSIMD dims input h_input_count h_dims kernel
+
+-- ===== Asinh SIMD Operator Implementation =====
+
+/-- Asinh kernel function: applies inverse hyperbolic sine to a single input -/
+noncomputable def asinhKernel : KernelFunction 1 :=
+  fun v => Real.arsinh (v.get ⟨0, by norm_num⟩)
+
+/-- Asinh SIMD function (使用通用的element-wise构造器) -/
+noncomputable def asinhSIMD (dims : List ℕ) (input : MultiTensorInput)
+    (h_input_count : input.p = 1)
+    (h_dims : input.dims.get ⟨0, by rw [h_input_count]; norm_num⟩ = dims) :
+    SIMDFunction input dims :=
+  createUnaryElementwiseSIMD dims input h_input_count h_dims asinhKernel
+
+/-- Proof that Asinh is a SIMD function (使用通用的element-wise证明模板) -/
+theorem asinh_is_SIMD (dims : List ℕ) (input : MultiTensorInput)
+    (h_input_count : input.p = 1)
+    (h_dims : input.dims.get ⟨0, by rw [h_input_count]; norm_num⟩ = dims) :
+    isSIMDFunction input dims (fun _ => applySIMD input dims (asinhSIMD dims input h_input_count h_dims)) := by
+  -- asinhSIMD 被定义为 createUnaryElementwiseSIMD，所以我们使用通用的证明
+  simp only [asinhSIMD]
+  exact unaryElementwise_is_SIMD dims input h_input_count h_dims asinhKernel
+
+/-- Theorem: Asinh kernel function is well-formed -/
+theorem asinh_is_wellformed : WellFormedKernel 1 asinhKernel := by
+  intro i
+  -- Since k = 1, we have i = 0
+  fin_cases i
+  -- Construct two vectors: v with value 0, v' with value 1
+  use List.Vector.ofFn (fun _ => (0 : ℝ)), List.Vector.ofFn (fun _ => (1 : ℝ))
+  constructor
+  · -- 1. v.get 0 ≠ v'.get 0
+    simp [List.Vector.get_ofFn]
+  · constructor
+    · -- 2. ∀ j : Fin 1, j ≠ 0 → v.get j = v'.get j
+      intro j hj
+      -- This is vacuously true since there's no j ≠ 0 in Fin 1
+      fin_cases j
+      contradiction
+    · -- 3. asinhKernel v ≠ asinhKernel v'
+      simp only [asinhKernel, List.Vector.get_ofFn]
+      -- Goal: Real.arsinh 0 ≠ Real.arsinh 1
+      -- We know arsinh is strictly monotonic and injective
+      have h_inj := StrictMono.injective Real.arsinh_strictMono
+      have h_ne : (0 : ℝ) ≠ 1 := by norm_num
+      exact h_inj.ne h_ne
+
+
 
 end SIMD
