@@ -154,4 +154,5 @@ theorem sum_is_wellformed (k : ℕ) : WellFormedKernel k (sumKernel k) := by
 
         rw [sum_v, sum_v']
         norm_num
+
 end SIMD
