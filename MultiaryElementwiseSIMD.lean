@@ -777,9 +777,8 @@ theorem lessOrEqual_kernel_is_wellformed : WellFormedKernel 2 lessOrEqualKernel 
         -- 2 ≤ 1 is false ≠ 2 ≤ 3 is true
         norm_num
 
--- ===== n元算子：Min, Max, Mean =====
 
-/-- Min kernel function: 计算n个输入中的最小值 -/
+/-- 证明Max kernel function是良构的 -/
 noncomputable def minKernel (n : ℕ) : KernelFunction n :=
   fun v =>
     if n = 0 then 0
@@ -900,6 +899,7 @@ theorem min_kernel_is_wellformed (n : ℕ) : WellFormedKernel n (minKernel n) :=
             using base
         simpa using this
 
+/-- 证明Max kernel function是良构的 -/
 theorem max_kernel_is_wellformed (n : ℕ) : WellFormedKernel n (maxKernel n) := by
   intro i
   by_cases h : n = 0
@@ -912,12 +912,47 @@ theorem max_kernel_is_wellformed (n : ℕ) : WellFormedKernel n (maxKernel n) :=
     · constructor
       · intro j hij
         simp [List.Vector.get_ofFn, hij]
-      · -- 直接使用simp和norm_num来解决
-        simp only [maxKernel, h, if_false, List.Vector.get_ofFn, ne_eq]
-        -- 对于具体的数值，使用norm_num应该能解决
-        -- 第一个向量在位置i为1，第二个向量全为0
-        -- Finset操作的结果应该不同
-        sorry/-- 证明Mean kernel function是良构的 -/
+      · classical
+        simp only [maxKernel, h, if_false, List.Vector.get_ofFn]
+        set s1 := (Finset.univ : Finset (Fin n)).image (fun j => if j = i then (1 : ℝ) else 0) with hs1
+        set s2 := (Finset.univ : Finset (Fin n)).image (fun _ => (0 : ℝ)) with hs2
+        change s1.max.getD 0 ≠ s2.max.getD 0
+        have h1_mem : (1 : ℝ) ∈ s1 := by
+          refine Finset.mem_image.mpr ?_
+          refine ⟨i, Finset.mem_univ i, ?_⟩
+          simp [s1, hs1]
+        have h0_mem : (0 : ℝ) ∈ s2 := by
+          refine Finset.mem_image.mpr ?_
+          refine ⟨⟨0, Nat.pos_of_ne_zero h⟩, Finset.mem_univ _, ?_⟩
+          simp [s2, hs2]
+        have h_le_s1 : s1.max ≤ ((1 : ℝ) : WithBot ℝ) := by
+          refine Finset.max_le ?_
+          intro a ha
+          rcases Finset.mem_image.mp ha with ⟨j, -, rfl⟩
+          by_cases hji : j = i
+          · subst hji; simp
+          · simp [hji]
+        have h_s1_le : ((1 : ℝ) : WithBot ℝ) ≤ s1.max := by
+          simpa [hs1] using (Finset.le_max h1_mem)
+        have hs1_max : s1.max = ((1 : ℝ) : WithBot ℝ) :=
+          le_antisymm h_le_s1 h_s1_le
+        have h_le_s2 : s2.max ≤ ((0 : ℝ) : WithBot ℝ) := by
+          refine Finset.max_le ?_
+          intro a ha
+          rcases Finset.mem_image.mp ha with ⟨j, -, rfl⟩
+          simp
+        have h_s2_le : ((0 : ℝ) : WithBot ℝ) ≤ s2.max := by
+          simpa [hs2] using (Finset.le_max h0_mem)
+        have hs2_max : s2.max = ((0 : ℝ) : WithBot ℝ) :=
+          le_antisymm h_le_s2 h_s2_le
+        have base : Option.getD (Option.some (1 : ℝ)) 0 ≠ Option.getD (Option.some (0 : ℝ)) 0 := by
+          simp
+        have : s1.max.getD 0 ≠ s2.max.getD 0 := by
+          simpa [hs1_max, hs2_max, WithBot.some_eq_coe]
+            using base
+        simpa using this
+
+/-- 证明Mean kernel function是良构的 -/
 
 theorem mean_kernel_is_wellformed (n : ℕ) : WellFormedKernel n (meanKernel n) := by
   intro i
