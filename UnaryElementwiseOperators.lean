@@ -707,4 +707,48 @@ theorem erf_is_wellformed : WellFormedKernel 1 erfKernel := by
         · -- 0 < 1
           norm_num
 
+/-- Asinh kernel function: applies inverse hyperbolic sine to a single input -/
+noncomputable def asinhKernel : KernelFunction 1 :=
+  fun v => Real.arsinh (v.get ⟨0, by norm_num⟩)
+
+/-- Asinh SIMD function (使用通用的element-wise构造器) -/
+noncomputable def asinhSIMD (dims : List ℕ) (input : MultiTensorInput)
+    (h_input_count : input.p = 1)
+    (h_dims : input.dims.get ⟨0, by rw [h_input_count]; norm_num⟩ = dims) :
+    SIMDFunction input dims :=
+  createUnaryElementwiseSIMD dims input h_input_count h_dims asinhKernel
+
+/-- Proof that Asinh is a SIMD function (使用通用的element-wise证明模板) -/
+theorem asinh_is_SIMD (dims : List ℕ) (input : MultiTensorInput)
+    (h_input_count : input.p = 1)
+    (h_dims : input.dims.get ⟨0, by rw [h_input_count]; norm_num⟩ = dims) :
+    isSIMDFunction input dims (fun _ => applySIMD input dims (asinhSIMD dims input h_input_count h_dims)) := by
+  -- asinhSIMD 被定义为 createUnaryElementwiseSIMD，所以我们使用通用的证明
+  simp only [asinhSIMD]
+  exact unaryElementwise_is_SIMD dims input h_input_count h_dims asinhKernel
+
+/-- Theorem: Asinh kernel function is well-formed -/
+theorem asinh_is_wellformed : WellFormedKernel 1 asinhKernel := by
+  intro i
+  -- Since k = 1, we have i = 0
+  fin_cases i
+  -- Construct two vectors: v with value 0, v' with value 1
+  use List.Vector.ofFn (fun _ => (0 : ℝ)), List.Vector.ofFn (fun _ => (1 : ℝ))
+  constructor
+  · -- 1. v.get 0 ≠ v'.get 0
+    simp [List.Vector.get_ofFn]
+  · constructor
+    · -- 2. ∀ j : Fin 1, j ≠ 0 → v.get j = v'.get j
+      intro j hj
+      -- This is vacuously true since there's no j ≠ 0 in Fin 1
+      fin_cases j
+      contradiction
+    · -- 3. asinhKernel v ≠ asinhKernel v'
+      simp only [asinhKernel, List.Vector.get_ofFn]
+      -- Goal: Real.arsinh 0 ≠ Real.arsinh 1
+      -- We know arsinh is strictly monotonic and injective
+      have h_inj := StrictMono.injective Real.arsinh_strictMono
+      have h_ne : (0 : ℝ) ≠ 1 := by norm_num
+      exact h_inj.ne h_ne
+      
 end UnaryElementwiseOperators

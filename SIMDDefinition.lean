@@ -204,52 +204,68 @@ theorem unaryElementwise_is_SIMD (dims : List ℕ) (input : MultiTensorInput)
     isSIMDFunction input dims (fun _ => applySIMD input dims (createUnaryElementwiseSIMD dims input h_input_count h_dims kernel)) := by
   use createUnaryElementwiseSIMD dims input h_input_count h_dims kernel
 
--- ===== Asinh SIMD Operator Implementation =====
+-- ===== 带全局参数的SIMD函数支持 =====
 
-/-- Asinh kernel function: applies inverse hyperbolic sine to a single input -/
-noncomputable def asinhKernel : KernelFunction 1 :=
-  fun v => Real.arsinh (v.get ⟨0, by norm_num⟩)
+/-- 带全局参数的核函数：k个标量输入，加上若干全局参数 -/
+def ParametrizedKernelFunction (k : ℕ) (ParamType : Type) : Type :=
+  ParamType → (List.Vector ℝ k) → ℝ
 
-/-- Asinh SIMD function (使用通用的element-wise构造器) -/
-noncomputable def asinhSIMD (dims : List ℕ) (input : MultiTensorInput)
+/-- 带全局参数的SIMD函数结构 -/
+structure ParametrizedSIMDFunction (input : MultiTensorInput) (output_dims : List ℕ) (ParamType : Type) where
+  k : ℕ  -- 标量输入数量
+  kernel : ParametrizedKernelFunction k ParamType  -- 带参数的核函数
+  dependency : GeneralizedDependencyMapping input output_dims k
+  params : ParamType  -- 全局参数
+
+/-- 应用带参数的SIMD函数到指定输出索引 -/
+def applyParametrizedSIMDAt (input : MultiTensorInput) (output_dims : List ℕ) (ParamType : Type)
+    (simd : ParametrizedSIMDFunction input output_dims ParamType)
+    (output_idx : Index output_dims.length) : ℝ :=
+  let input_pointers := simd.dependency.map output_idx
+  let input_scalars := List.Vector.map (getValueAtPointer input) input_pointers
+  simd.kernel simd.params input_scalars
+
+/-- 完整的带参数SIMD函数应用 -/
+def applyParametrizedSIMD (input : MultiTensorInput) (output_dims : List ℕ) (ParamType : Type)
+    (simd : ParametrizedSIMDFunction input output_dims ParamType) : Tensor output_dims :=
+  fun output_idx => applyParametrizedSIMDAt input output_dims ParamType simd output_idx
+
+/-- 检查函数是否为带参数的SIMD函数 -/
+def isParametrizedSIMDFunction (input : MultiTensorInput) (output_dims : List ℕ) (ParamType : Type)
+    (f : ParamType → Tensor output_dims) : Prop :=
+  ∃ (simd : ParametrizedSIMDFunction input output_dims ParamType),
+    ∀ params, f params = applyParametrizedSIMD input output_dims ParamType { simd with params := params }
+
+/-- 带参数的一元element-wise核函数的良构性定义 -/
+def WellFormedParametrizedKernel (k : ℕ) (ParamType : Type) (θ : ParametrizedKernelFunction k ParamType) : Prop :=
+  ∀ params : ParamType, WellFormedKernel k (θ params)
+
+/-- 通用带参数一元element-wise SIMD函数构造器 -/
+noncomputable def createParametrizedUnaryElementwiseSIMD (dims : List ℕ) (input : MultiTensorInput) (ParamType : Type)
     (h_input_count : input.p = 1)
-    (h_dims : input.dims.get ⟨0, by rw [h_input_count]; norm_num⟩ = dims) :
-    SIMDFunction input dims :=
-  createUnaryElementwiseSIMD dims input h_input_count h_dims asinhKernel
+    (h_dims : input.dims.get ⟨0, by rw [h_input_count]; norm_num⟩ = dims)
+    (kernel : ParametrizedKernelFunction 1 ParamType)
+    (params : ParamType) :
+    ParametrizedSIMDFunction input dims ParamType :=
+{
+  k := 1,
+  kernel := kernel,
+  dependency := unaryElementwiseDependency dims input h_input_count h_dims,
+  params := params
+}
 
-/-- Proof that Asinh is a SIMD function (使用通用的element-wise证明模板) -/
-theorem asinh_is_SIMD (dims : List ℕ) (input : MultiTensorInput)
+/-- 通用带参数一元element-wise SIMD函数证明模板 -/
+theorem parametrizedUnaryElementwise_is_SIMD (dims : List ℕ) (input : MultiTensorInput) (ParamType : Type)
     (h_input_count : input.p = 1)
-    (h_dims : input.dims.get ⟨0, by rw [h_input_count]; norm_num⟩ = dims) :
-    isSIMDFunction input dims (fun _ => applySIMD input dims (asinhSIMD dims input h_input_count h_dims)) := by
-  -- asinhSIMD 被定义为 createUnaryElementwiseSIMD，所以我们使用通用的证明
-  simp only [asinhSIMD]
-  exact unaryElementwise_is_SIMD dims input h_input_count h_dims asinhKernel
-
-/-- Theorem: Asinh kernel function is well-formed -/
-theorem asinh_is_wellformed : WellFormedKernel 1 asinhKernel := by
-  intro i
-  -- Since k = 1, we have i = 0
-  fin_cases i
-  -- Construct two vectors: v with value 0, v' with value 1
-  use List.Vector.ofFn (fun _ => (0 : ℝ)), List.Vector.ofFn (fun _ => (1 : ℝ))
-  constructor
-  · -- 1. v.get 0 ≠ v'.get 0
-    simp [List.Vector.get_ofFn]
-  · constructor
-    · -- 2. ∀ j : Fin 1, j ≠ 0 → v.get j = v'.get j
-      intro j hj
-      -- This is vacuously true since there's no j ≠ 0 in Fin 1
-      fin_cases j
-      contradiction
-    · -- 3. asinhKernel v ≠ asinhKernel v'
-      simp only [asinhKernel, List.Vector.get_ofFn]
-      -- Goal: Real.arsinh 0 ≠ Real.arsinh 1
-      -- We know arsinh is strictly monotonic and injective
-      have h_inj := StrictMono.injective Real.arsinh_strictMono
-      have h_ne : (0 : ℝ) ≠ 1 := by norm_num
-      exact h_inj.ne h_ne
-
-
+    (h_dims : input.dims.get ⟨0, by rw [h_input_count]; norm_num⟩ = dims)
+    (kernel : ParametrizedKernelFunction 1 ParamType)
+    [Inhabited ParamType] :
+    isParametrizedSIMDFunction input dims ParamType
+      (fun p => applyParametrizedSIMD input dims ParamType
+        (createParametrizedUnaryElementwiseSIMD dims input ParamType h_input_count h_dims kernel p)) := by
+  use createParametrizedUnaryElementwiseSIMD dims input ParamType h_input_count h_dims kernel default
+  intro params
+  -- The definition unfolds to show equality
+  simp [createParametrizedUnaryElementwiseSIMD, applyParametrizedSIMD]
 
 end SIMD

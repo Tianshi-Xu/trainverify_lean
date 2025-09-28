@@ -1,17 +1,18 @@
 import trainverify.SIMDDefinition
-import Mathlib.Data.Real.Basic
-import Mathlib.Data.Finset.Basic
+
 import Mathlib.Algebra.BigOperators.Group.Finset.Basic
-import Mathlib.Tactic.Linarith
-import Mathlib.Tactic.Ring
+import Mathlib.Data.Finset.Basic
+import Mathlib.Data.Real.Basic
 import Mathlib.Tactic.FinCases
 import Mathlib.Tactic.IntervalCases
+import Mathlib.Tactic.Linarith
+import Mathlib.Tactic.Ring
 
 namespace SIMD
 
--- ============================================================================
--- Helper lemmas for GeneralizedDependencyMapping
--- ============================================================================
+-- ================================================================================
+-- Helper Lemmas
+-- ================================================================================
 
 /-- Helper lemma: valid output index gives valid component indices -/
 lemma valid_output_components (M N : ℕ) (out_idx : Index 2)
