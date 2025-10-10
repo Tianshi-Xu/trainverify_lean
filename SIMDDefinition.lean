@@ -9,6 +9,7 @@ import Mathlib.Algebra.BigOperators.Ring
 import Mathlib.Tactic.Linarith
 import Mathlib.Tactic.Ring
 import Mathlib.Data.Vector.Basic -- For Vector.get_eq_get_toList
+import Mathlib.Analysis.SpecialFunctions.Arsinh -- For Real.arsinh
 
 namespace SIMD
 
@@ -154,4 +155,117 @@ theorem sum_is_wellformed (k : ℕ) : WellFormedKernel k (sumKernel k) := by
 
         rw [sum_v, sum_v']
         norm_num
+
+-- ===== 通用Element-wise算子支持 =====
+
+/-- 通用的一元element-wise依赖映射：用于所有一元element-wise算子
+    将每个输出索引映射到输入张量中的相同索引位置 -/
+def unaryElementwiseDependency (dims : List ℕ) (input : MultiTensorInput)
+    (h_input_count : input.p = 1)
+    (h_dims : input.dims.get ⟨0, by rw [h_input_count]; norm_num⟩ = dims) :
+    GeneralizedDependencyMapping input dims 1 :=
+{
+  map := fun out_idx =>
+    List.Vector.ofFn (fun _ : Fin 1 =>
+      { tensor_idx := ⟨0, by rw [h_input_count]; norm_num⟩,
+        multi_dim_idx := h_dims.symm ▸ out_idx }),
+  valid := by
+    intro out_idx h_valid_out
+    intro i
+    -- There's only one element in the vector (i = 0)
+    simp [List.Vector.get_ofFn]
+    -- Need to prove validInputPointer for the mapped pointer
+    simp [validInputPointer, validIndex]
+    -- The goal is: ∀ (j : Fin (input.dims.get ⟨0, _⟩).length), (h_dims.symm ▸ out_idx).get j < (input.dims.get ⟨0, _⟩).get j
+    -- Use subst to substitute h_dims equation
+    subst h_dims
+    -- Now the cast becomes identity and should simplify
+    simp
+    exact h_valid_out
+}
+
+/-- 通用一元element-wise SIMD函数构造器 -/
+noncomputable def createUnaryElementwiseSIMD (dims : List ℕ) (input : MultiTensorInput)
+    (h_input_count : input.p = 1)
+    (h_dims : input.dims.get ⟨0, by rw [h_input_count]; norm_num⟩ = dims)
+    (kernel : KernelFunction 1) :
+    SIMDFunction input dims :=
+{
+  k := 1,
+  kernel := kernel,
+  dependency := unaryElementwiseDependency dims input h_input_count h_dims
+}
+
+/-- 通用一元element-wise SIMD函数证明模板 -/
+theorem unaryElementwise_is_SIMD (dims : List ℕ) (input : MultiTensorInput)
+    (h_input_count : input.p = 1)
+    (h_dims : input.dims.get ⟨0, by rw [h_input_count]; norm_num⟩ = dims)
+    (kernel : KernelFunction 1) :
+    isSIMDFunction input dims (fun _ => applySIMD input dims (createUnaryElementwiseSIMD dims input h_input_count h_dims kernel)) := by
+  use createUnaryElementwiseSIMD dims input h_input_count h_dims kernel
+
+-- ===== 带全局参数的SIMD函数支持 =====
+
+/-- 带全局参数的核函数：k个标量输入，加上若干全局参数 -/
+def ParametrizedKernelFunction (k : ℕ) (ParamType : Type) : Type :=
+  ParamType → (List.Vector ℝ k) → ℝ
+
+/-- 带全局参数的SIMD函数结构 -/
+structure ParametrizedSIMDFunction (input : MultiTensorInput) (output_dims : List ℕ) (ParamType : Type) where
+  k : ℕ  -- 标量输入数量
+  kernel : ParametrizedKernelFunction k ParamType  -- 带参数的核函数
+  dependency : GeneralizedDependencyMapping input output_dims k
+  params : ParamType  -- 全局参数
+
+/-- 应用带参数的SIMD函数到指定输出索引 -/
+def applyParametrizedSIMDAt (input : MultiTensorInput) (output_dims : List ℕ) (ParamType : Type)
+    (simd : ParametrizedSIMDFunction input output_dims ParamType)
+    (output_idx : Index output_dims.length) : ℝ :=
+  let input_pointers := simd.dependency.map output_idx
+  let input_scalars := List.Vector.map (getValueAtPointer input) input_pointers
+  simd.kernel simd.params input_scalars
+
+/-- 完整的带参数SIMD函数应用 -/
+def applyParametrizedSIMD (input : MultiTensorInput) (output_dims : List ℕ) (ParamType : Type)
+    (simd : ParametrizedSIMDFunction input output_dims ParamType) : Tensor output_dims :=
+  fun output_idx => applyParametrizedSIMDAt input output_dims ParamType simd output_idx
+
+/-- 检查函数是否为带参数的SIMD函数 -/
+def isParametrizedSIMDFunction (input : MultiTensorInput) (output_dims : List ℕ) (ParamType : Type)
+    (f : ParamType → Tensor output_dims) : Prop :=
+  ∃ (simd : ParametrizedSIMDFunction input output_dims ParamType),
+    ∀ params, f params = applyParametrizedSIMD input output_dims ParamType { simd with params := params }
+
+/-- 带参数的一元element-wise核函数的良构性定义 -/
+def WellFormedParametrizedKernel (k : ℕ) (ParamType : Type) (θ : ParametrizedKernelFunction k ParamType) : Prop :=
+  ∀ params : ParamType, WellFormedKernel k (θ params)
+
+/-- 通用带参数一元element-wise SIMD函数构造器 -/
+noncomputable def createParametrizedUnaryElementwiseSIMD (dims : List ℕ) (input : MultiTensorInput) (ParamType : Type)
+    (h_input_count : input.p = 1)
+    (h_dims : input.dims.get ⟨0, by rw [h_input_count]; norm_num⟩ = dims)
+    (kernel : ParametrizedKernelFunction 1 ParamType)
+    (params : ParamType) :
+    ParametrizedSIMDFunction input dims ParamType :=
+{
+  k := 1,
+  kernel := kernel,
+  dependency := unaryElementwiseDependency dims input h_input_count h_dims,
+  params := params
+}
+
+/-- 通用带参数一元element-wise SIMD函数证明模板 -/
+theorem parametrizedUnaryElementwise_is_SIMD (dims : List ℕ) (input : MultiTensorInput) (ParamType : Type)
+    (h_input_count : input.p = 1)
+    (h_dims : input.dims.get ⟨0, by rw [h_input_count]; norm_num⟩ = dims)
+    (kernel : ParametrizedKernelFunction 1 ParamType)
+    [Inhabited ParamType] :
+    isParametrizedSIMDFunction input dims ParamType
+      (fun p => applyParametrizedSIMD input dims ParamType
+        (createParametrizedUnaryElementwiseSIMD dims input ParamType h_input_count h_dims kernel p)) := by
+  use createParametrizedUnaryElementwiseSIMD dims input ParamType h_input_count h_dims kernel default
+  intro params
+  -- The definition unfolds to show equality
+  simp [createParametrizedUnaryElementwiseSIMD, applyParametrizedSIMD]
+
 end SIMD
