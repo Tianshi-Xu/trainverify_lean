@@ -750,5 +750,5 @@ theorem asinh_is_wellformed : WellFormedKernel 1 asinhKernel := by
       have h_inj := StrictMono.injective Real.arsinh_strictMono
       have h_ne : (0 : ℝ) ≠ 1 := by norm_num
       exact h_inj.ne h_ne
-      
+
 end UnaryElementwiseOperators
