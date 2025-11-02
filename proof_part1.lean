@@ -2,13 +2,13 @@ import trainverify.proof_def
 
 namespace TrainVerify
 
-lemma dependency_index_cover_of_eq
-  (f g : SIMDFunction input_dims output_dims)
-  (hWellF : WellFormedKernel f.kernel)
-    (hDistinctF : NoRepeatedIndices f.dependency)
-    (hDistinctG : NoRepeatedIndices g.dependency)
+lemma lemma5_1_dependency_set_eq_proof_step
+  (f g : def2_3_SIMDFunction input_dims output_dims)
+  (hWellF : def3_4_WellFormedKernel f.kernel)
+    (hDistinctF : def3_5_NoRepeatedIndices f.dependency)
+    (hDistinctG : def3_5_NoRepeatedIndices g.dependency)
     (i : Index output_dims.length)
-    (hEq : ∀ x : Tensor input_dims,
+    (hEq : ∀ x : def1_1_Tensor input_dims,
       applySIMD input_dims output_dims f x i =
         applySIMD input_dims output_dims g x i)
     (a : Fin f.k) :
@@ -31,8 +31,8 @@ lemma dependency_index_cover_of_eq
     intro b hb
     have : τf.get b ≠ τf.get a := hDistinctτf hb
     simpa [target]
-  let x₀ : Tensor input_dims := fun _ => (0 : ℝ)
-  let x₁ : Tensor input_dims := fun p => if p = target then (1 : ℝ) else 0
+  let x₀ : def1_1_Tensor input_dims := fun _ => (0 : ℝ)
+  let x₁ : def1_1_Tensor input_dims := fun p => if p = target then (1 : ℝ) else 0
   let vecf₀ := List.Vector.map (fun p => x₀ p) τf
   let vecf₁ := List.Vector.map (fun p => x₁ p) τf
   let vecg₀ := List.Vector.map (fun p => x₀ p) τg
@@ -67,25 +67,25 @@ lemma dependency_index_cover_of_eq
 /-- *Claim 6* (skeleton). If two well-formed SIMD functions agree on all inputs
 at a fixed output index, then the corresponding dependency vectors differ only
 by a unique permutation. -/
-lemma dependencyPermutation_unique
-    (f g : SIMDFunction input_dims output_dims)
-    (hWellF : WellFormedKernel f.kernel)
-    (hWellG : WellFormedKernel g.kernel)
-    (hDistinctF : NoRepeatedIndices f.dependency)
-    (hDistinctG : NoRepeatedIndices g.dependency)
+lemma theorem5_2_dependencyPermutation_unique
+    (f g : def2_3_SIMDFunction input_dims output_dims)
+    (hWellF : def3_4_WellFormedKernel f.kernel)
+    (hWellG : def3_4_WellFormedKernel g.kernel)
+    (hDistinctF : def3_5_NoRepeatedIndices f.dependency)
+    (hDistinctG : def3_5_NoRepeatedIndices g.dependency)
     (hK : f.k = g.k)
     (i : Index output_dims.length)
-    (hEq : ∀ x : Tensor input_dims,
+    (hEq : ∀ x : def1_1_Tensor input_dims,
       applySIMD input_dims output_dims f x i =
         applySIMD input_dims output_dims g x i) :
     ∃! (P : Equiv.Perm (Fin g.k)),
       List.Vector.ofFn (fun j =>
-        (DependencyMapping.castLength hK f.dependency i).get (P j)) =
+        (def2_2_DependencyMapping.castLength hK f.dependency i).get (P j)) =
         g.dependency i := by
   classical
   set τf := f.dependency i
   set τg := g.dependency i
-  set τfCast := DependencyMapping.castLength hK f.dependency i
+  set τfCast := def2_2_DependencyMapping.castLength hK f.dependency i
   have hDistinctτf : ∀ {u v : Fin f.k}, u ≠ v → τf.get u ≠ τf.get v := by
     intro u v huv
     simpa [τf] using hDistinctF i u v huv
@@ -104,8 +104,8 @@ lemma dependencyPermutation_unique
       simpa [Fin.cast_cast_symm] using congrArg (Fin.cast hK) hIdx
     exact hneq this
   have hCover_fg : ∀ a : Fin f.k, ∃ b : Fin g.k, τg.get b = τf.get a :=
-    dependency_index_cover_of_eq f g hWellF hDistinctF hDistinctG i hEq
-  have hEqSymm : ∀ x : Tensor input_dims,
+    lemma5_1_dependency_set_eq_proof_step f g hWellF hDistinctF hDistinctG i hEq
+  have hEqSymm : ∀ x : def1_1_Tensor input_dims,
       applySIMD input_dims output_dims g x i =
         applySIMD input_dims output_dims f x i := by
     intro x
@@ -113,7 +113,7 @@ lemma dependencyPermutation_unique
   have hCover_gf : ∀ j : Fin g.k, ∃! a : Fin f.k, τf.get a = τg.get j := by
     intro j
     obtain ⟨a, ha⟩ :=
-  dependency_index_cover_of_eq g f hWellG hDistinctG hDistinctF i hEqSymm j
+  lemma5_1_dependency_set_eq_proof_step g f hWellG hDistinctG hDistinctF i hEqSymm j
     refine ⟨a, ha, ?_⟩
     intro a' ha'
     have : τf.get a' = τf.get a := by
@@ -180,32 +180,32 @@ lemma dependencyPermutation_unique
 
 /-! *Lemma 7* (skeleton). Equality on the zero vertex implies the two kernels
 are equivalent up to a permutation set. -/
-lemma kernelPermutation_from_vertexPremise
-    (f g : SIMDFunction input_dims output_dims)
-    (hWellF : WellFormedKernel f.kernel)
-    (hWellG : WellFormedKernel g.kernel)
-    (hDistinctF : NoRepeatedIndices f.dependency)
-    (hDistinctG : NoRepeatedIndices g.dependency)
+lemma lemma5_3_kernelPermutation_from_vertexPremise
+    (f g : def2_3_SIMDFunction input_dims output_dims)
+    (hWellF : def3_4_WellFormedKernel f.kernel)
+    (hWellG : def3_4_WellFormedKernel g.kernel)
+    (hDistinctF : def3_5_NoRepeatedIndices f.dependency)
+    (hDistinctG : def3_5_NoRepeatedIndices g.dependency)
     (hK : f.k = g.k)
-    (hPremise : SMTPremise input_dims output_dims
+    (hPremise : def4_1_SMTPremise input_dims output_dims
       (applySIMD input_dims output_dims f)
       (applySIMD input_dims output_dims g)) :
-    KernelPermutationSetEquivalent
-      (KernelFunction.castLength hK f.kernel)
+    def3_3_KernelPermutationSetEquivalent
+      (def2_1_KernelFunction.castLength hK f.kernel)
       g.kernel := by
   classical
   -- zero vertex where the SMT premise applies
   let i₀ : Index output_dims.length := List.Vector.ofFn fun _ => 0
-  have hVertex : i₀ ∈ VertexIndexSet output_dims.length := by
+  have hVertex : i₀ ∈ def4_1_VertexIndexSet output_dims.length := by
     intro j; exact Or.inl (by simp [i₀])
-  have hEqZero : ∀ x : Tensor input_dims,
+  have hEqZero : ∀ x : def1_1_Tensor input_dims,
       applySIMD input_dims output_dims f x i₀ =
         applySIMD input_dims output_dims g x i₀ :=
     fun x => hPremise x i₀ hVertex
   -- unpack dependency information at the zero vertex
   set τf := f.dependency i₀
   set τg := g.dependency i₀
-  set τfCast := DependencyMapping.castLength hK f.dependency i₀
+  set τfCast := def2_2_DependencyMapping.castLength hK f.dependency i₀
   have hDistinctτf : ∀ {a b : Fin f.k}, a ≠ b → τf.get a ≠ τf.get b := by
     intro a b hneq
     simpa [τf] using hDistinctF i₀ a b hneq
@@ -229,7 +229,7 @@ lemma kernelPermutation_from_vertexPremise
     exact (hDistinctτfCast hneq) h
   -- obtain the unique permutation aligning the dependency vectors
   obtain ⟨P, hVecEq, hUniqueP⟩ :=
-    dependencyPermutation_unique f g hWellF hWellG hDistinctF hDistinctG hK i₀ hEqZero
+    theorem5_2_dependencyPermutation_unique f g hWellF hWellG hDistinctF hDistinctG hK i₀ hEqZero
   have hAlign : ∀ j : Fin g.k, τg.get j = τfCast.get (P j) := by
     intro j
     have h := congrArg (fun v => v.get j) hVecEq
@@ -245,7 +245,7 @@ lemma kernelPermutation_from_vertexPremise
       have := hAlign j
       simpa [hPP] using this
     -- construct a tensor realizing any given kernel input vector
-    let xTensor : Tensor input_dims := fun idx =>
+    let xTensor : def1_1_Tensor input_dims := fun idx =>
       if h : ∃ a : Fin g.k, τfCast.get a = idx then
         xVec.get (Classical.choose h)
       else
@@ -298,7 +298,7 @@ lemma kernelPermutation_from_vertexPremise
       simpa [hVec_f, hVec_g]
         using hSimd'
     have hCastEval :
-        KernelFunction.castLength hK f.kernel xVec =
+        def2_1_KernelFunction.castLength hK f.kernel xVec =
           f.kernel (List.Vector.ofFn fun a : Fin f.k => xVec.get (Fin.cast hK a)) := by
-      simpa using KernelFunction.castLength_eval hK f.kernel xVec
+      simpa using def2_1_KernelFunction.castLength_eval hK f.kernel xVec
     exact hCastEval.trans (by simpa [hPP] using hKernelEq)
